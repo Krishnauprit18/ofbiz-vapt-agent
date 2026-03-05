@@ -1,6 +1,47 @@
 import re
 from core.llm.client import OllamaClient, OllamaConnectionError
 
+
+def _patch_ssl_verify(code: str) -> str:
+    """
+    Post-processing safety net:
+    OFBiz uses self-signed certs. Any requests call that lacks verify=False will crash.
+    This function ensures verify=False is present on every requests call,
+    and adds urllib3 warning suppression at the top.
+    """
+    # Add urllib3 warning suppression at top (after imports, before first non-import line)
+    suppress_block = (
+        "import urllib3\n"
+        "urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)\n"
+    )
+    if "disable_warnings" not in code:
+        # Insert after the last import line
+        lines = code.splitlines()
+        last_import_idx = 0
+        for i, line in enumerate(lines):
+            if line.startswith("import ") or line.startswith("from "):
+                last_import_idx = i
+        lines.insert(last_import_idx + 1, suppress_block.rstrip())
+        code = "\n".join(lines)
+
+    # Patch requests.get/post/put/delete/request calls missing verify=False
+    # Pattern: requests.METHOD(... ) where verify= is not already present in that call
+    # Strategy: add verify=False before the closing ) of each requests call
+    def add_verify(m):
+        call = m.group(0)
+        if "verify=" in call:
+            return call  # already has it
+        # Insert verify=False before the last closing paren
+        return call.rstrip(")") + ", verify=False)"
+
+    # Match single-line requests calls
+    code = re.sub(
+        r'requests\.(get|post|put|delete|patch|request|Session)\([^)]+\)',
+        add_verify,
+        code
+    )
+    return code
+
 def generate_poc(vuln_description, code_context, vuln_understanding):
     """
     Generates a Python PoC script using the LLM based on the vulnerability context.
@@ -21,8 +62,12 @@ You must analyze the provided vulnerability description, codebase context, and t
 Based on this information, generate a single Python script that attempts to trigger the vulnerability.
 
 CRITICAL RULES:
-- The script MUST be robust, include necessary imports (like 'requests'), and handle potential connection errors or SSL warnings.
+- The script MUST be robust, include necessary imports (like 'requests', 'urllib3'), and handle potential connection errors.
 - Target URL must be "https://localhost:8443" by default.
+- OFBiz uses a SELF-SIGNED SSL certificate. You MUST add these two lines near the top of the script:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+- Every single requests call (get, post, put, etc.) MUST include verify=False. Without this the script will crash.
 - If the payload contains special characters like template expressions (${...}, #{...}, <%...%> etc.) define them as raw strings r'...' or assign to variables. NEVER use f-strings for payloads.
 - The script must print clear success/failure output so results can be verified.
 - Output ONLY Python code enclosed in a ```python block. Zero explanations outside the code block.
@@ -82,6 +127,9 @@ Write the Python PoC script inside a ```python block to exploit this vulnerabili
                 poc_code = None
 
     if poc_code:
+        # Always patch SSL verify=False regardless of what LLM generated
+        poc_code = _patch_ssl_verify(poc_code)
+
         with open("exploit.py", "w", encoding="utf-8") as f:
             f.write(poc_code)
         print("[*] PoC script generated and saved as 'exploit.py'.")
