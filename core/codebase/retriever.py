@@ -84,26 +84,44 @@ class CodebaseRetriever:
         """
         self._build_index()
         stem_lower = stem.lower()
-        results = []
+        scored = {}  # path → best_score
 
+        # Score 1: stem is contained in filename
         for key, paths in self._file_index.items():
-            if stem_lower in key:
-                results.extend(paths)
+            base = key.replace('.java', '').replace('.groovy', '')
+            if stem_lower in base:
+                # Score = what fraction of the filename the stem covers
+                # Higher = more specific match (avoids BirtViewHandler for ViewHandler)
+                coverage = len(stem_lower) / max(len(base), 1)
+                for p in paths:
+                    scored[p] = max(scored.get(p, 0), coverage)
 
-        if results:
-            return results[:3]
+        # Only keep results where match coverage >= 50% of filename
+        # e.g. 'viewhandler'(11) in 'freemarkerviewhandler'(21) = 52% ✅
+        #      'viewhandler'(11) in 'birtviewhandler'(15) = 73% ✅ but...
+        # Extra check: prefer files where stem appears at end or start of name
+        strong = {p: s for p, s in scored.items() if s >= 0.50}
+        if strong:
+            top = sorted(strong.items(), key=lambda x: x[1], reverse=True)[:2]
+            return [p for p, _ in top]
 
-        # Sub-stem fallback: split PascalCase into words and try longest substrings
-        # e.g. ViewHandlerExt → ['View', 'Handler', 'Ext'] → try ViewHandler, HandlerExt
+        # Sub-stem fallback: split PascalCase into pairs of consecutive words
+        # e.g. ViewHandlerExt → ViewHandler, HandlerExt
         words = re.findall(r'[A-Z][a-z0-9]*', stem)
         if len(words) >= 2:
-            # Try pairs of consecutive words
             for i in range(len(words) - 1):
                 sub = (words[i] + words[i+1]).lower()
+                sub_scored = {}
                 for key, paths in self._file_index.items():
-                    if sub in key and paths not in results:
-                        results.extend(paths)
-            return results[:3]
+                    base = key.replace('.java', '').replace('.groovy', '')
+                    if sub in base:
+                        coverage = len(sub) / max(len(base), 1)
+                        for p in paths:
+                            sub_scored[p] = max(sub_scored.get(p, 0), coverage)
+                top_sub = sorted(sub_scored.items(), key=lambda x: x[1], reverse=True)[:2]
+                results = [p for p, _ in top_sub if sub_scored[p] >= 0.45]
+                if results:
+                    return results[:2]
 
         return []
 
@@ -216,7 +234,12 @@ class CodebaseRetriever:
             if str(p) not in seen_paths:
                 seen_paths.add(str(p))
                 context_parts.append(self._read_file_content(p, keywords=kw))
-                print(f"  [context] Added: {p.name}")
+                # Show relative path from codebase root for clarity
+                try:
+                    rel = p.relative_to(self.codebase_root)
+                except ValueError:
+                    rel = p.name
+                print(f"  [context] Added: {rel}")
 
         # Stage 1a: explicit file:line mentions
         for fname, lineno in line_matches:
