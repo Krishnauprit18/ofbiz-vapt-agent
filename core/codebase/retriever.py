@@ -86,8 +86,10 @@ class CodebaseRetriever:
         stem_lower = stem.lower()
         scored = {}  # path → best_score
 
-        # Score 1: stem is contained in filename
+        # Score 1: stem is contained in filename — only .java and .groovy (skip .xml/.ftl)
         for key, paths in self._file_index.items():
+            if not (key.endswith('.java') or key.endswith('.groovy')):
+                continue
             base = key.replace('.java', '').replace('.groovy', '')
             if stem_lower in base:
                 # Score = what fraction of the filename the stem covers
@@ -113,6 +115,8 @@ class CodebaseRetriever:
                 sub = (words[i] + words[i+1]).lower()
                 sub_scored = {}
                 for key, paths in self._file_index.items():
+                    if not (key.endswith('.java') or key.endswith('.groovy')):
+                        continue
                     base = key.replace('.java', '').replace('.groovy', '')
                     if sub in base:
                         coverage = len(sub) / max(len(base), 1)
@@ -254,7 +258,11 @@ class CodebaseRetriever:
                 add_path(p, kw=keywords)
 
         # Stage 2: fuzzy match on stems (catches FreeMarkerViewHandler for FreemarkerViewHandler)
+        # Skip stems whose exact file was already found in Stage 1 to avoid duplicates like TechDataServices
+        already_found_stems = {Path(sp).stem.lower() for sp in seen_paths}
         for stem in stems:
+            if stem.lower() in already_found_stems:
+                continue
             fuzzy_paths = self.find_file_fuzzy(stem)
             for p in fuzzy_paths:
                 add_path(p, kw=keywords)
