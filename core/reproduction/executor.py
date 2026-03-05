@@ -14,7 +14,7 @@ def run_exploit(script_path="exploit.py"):
             ["python3", script_path],
             capture_output=True,
             text=True,
-            timeout=30 # 30 seconds max execution time
+            timeout=120  # 120 seconds — OFBiz is slow, exploits may wait for responses
         )
         
         stdout = result.stdout
@@ -36,7 +36,7 @@ def run_exploit(script_path="exploit.py"):
             return False, stderr
             
     except subprocess.TimeoutExpired:
-        print("[-] Exploit execution timed out (30s). It might be a blind vulnerability or a hung process.")
+        print("[-] Exploit execution timed out (120s). It might be a blind vulnerability or a hung process.")
         return False, "Timeout"
     except Exception as e:
         print(f"[!] Critical error executing exploit: {e}")

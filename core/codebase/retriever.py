@@ -11,23 +11,37 @@ class CodebaseRetriever:
     def __init__(self, codebase_root=_DEFAULT_CODEBASE):
         self.codebase_root = Path(codebase_root)
 
+    # Common English / OFBiz noise words that are NOT class names
+    _NOISE_WORDS = {
+        "Apache", "OFBiz", "Java", "HTTP", "HTTPS", "User", "Admin", "True", "False",
+        "None", "This", "That", "When", "From", "With", "Path", "File", "Code",
+        "Template", "Request", "Response", "Server", "Client", "Data", "Note",
+        "Base", "Core", "Test", "View", "Main", "List", "Type", "Name", "Info",
+        "Error", "Exception", "Class", "Method", "Object", "Value", "Check",
+        "Allow", "Deny", "Null", "String", "Input", "Output", "Result", "Based",
+        "Using", "Being", "After", "Before", "Whether", "Against", "Through",
+        "CVE", "RCE", "SSTI", "SQL", "XSS", "CSRF", "SSRF", "API", "URL", "URI",
+    }
+
     def extract_file_mentions(self, text):
         """
         Extract potential Java/Groovy/XML file names from the vulnerability description.
+        Only picks PascalCase compound words (likely class names) — avoids noise words.
         """
-        # Look for things that look like filenames or class names
-        pattern = r'([a-zA-Z0-9_]+\.(?:java|groovy|xml|js|ftl))|(\b[A-Z][a-zA-Z0-9_]{3,}\b)'
-        matches = re.findall(pattern, text)
-        
         file_candidates = set()
-        for file_match, class_match in matches:
-            if file_match:
-                file_candidates.add(file_match)
-            if class_match:
-                # If it's a class name, check if it matches a java/groovy file
-                file_candidates.add(f"{class_match}.java")
-                file_candidates.add(f"{class_match}.groovy")
-        
+
+        # 1. Explicit filenames with extensions e.g. FooBar.java, widget.xml
+        for m in re.finditer(r'\b([a-zA-Z0-9_]+\.(?:java|groovy|xml|ftl|groovy))\b', text):
+            file_candidates.add(m.group(1))
+
+        # 2. PascalCase compound words that look like class names (min 2 words joined)
+        #    e.g. ViewHandlerExt, FreeMarkerWorker, RequestHandler — NOT Apache, User, CVE
+        for m in re.finditer(r'\b([A-Z][a-z]+(?:[A-Z][a-z0-9]+)+)\b', text):
+            word = m.group(1)
+            if word not in self._NOISE_WORDS:
+                file_candidates.add(f"{word}.java")
+                file_candidates.add(f"{word}.groovy")
+
         return list(file_candidates)
 
     def find_file(self, filename):
@@ -86,11 +100,11 @@ class CodebaseRetriever:
                     result_lines.append(f"--- {filename} (Top 150 lines) ---")
                     result_lines.extend(lines[:150])
             else:
-                result_lines.append(f"--- {filename} (Top 150 lines) ---")
-                result_lines.extend(lines[:150])
+                result_lines.append(f"--- {filename} (Top 300 lines) ---")
+                result_lines.extend(lines[:300])
 
             content = "\n".join(result_lines)
-            suffix = "\n... (truncated)" if len(lines) > 200 else ""
+            suffix = "\n... (truncated)" if len(lines) > 300 else ""
             return content + suffix
         except Exception as e:
             return f"Error reading '{filename}': {e}"
@@ -123,8 +137,13 @@ class CodebaseRetriever:
 
         if not context_parts:
             return "No relevant source code files found in the codebase matching the description."
-        
-        return "\n".join(context_parts)
+
+        # Cap total context to ~80,000 chars to avoid overloading LLM context window
+        MAX_CONTEXT_CHARS = 80000
+        combined = "\n".join(context_parts)
+        if len(combined) > MAX_CONTEXT_CHARS:
+            combined = combined[:MAX_CONTEXT_CHARS] + "\n... [context truncated to fit LLM window]"
+        return combined
 
 def get_code_context(description):
     retriever = CodebaseRetriever()

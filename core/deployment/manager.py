@@ -80,8 +80,8 @@ class DeployManager:
             return False
 
     def wait_for_health(self, timeout=300):
-        """Polls the OFBiz login URL until it's ready or times out."""
-        url = f"https://localhost:{self.port}/partymgr"
+        """Polls the OFBiz webtools URL until it's ready or times out."""
+        url = f"https://localhost:{self.port}/webtools/control/main"
         print(f"[*] Waiting for OFBiz to become healthy at {url} (Timeout: {timeout}s)...")
         print("[*] Note: OFBiz takes a while to load demo data and start up on the first run.")
         

@@ -23,7 +23,8 @@ Based on this information, generate a single Python script that attempts to trig
 CRITICAL RULES:
 - The script MUST be robust, include necessary imports (like 'requests'), and handle potential connection errors or SSL warnings.
 - Target URL must be "https://localhost:8443" by default.
-- ALL payload strings containing curly braces like FreeMarker tags (${...}) MUST be defined as raw strings: r'...' or use a variable. NEVER use f-strings for payloads.
+- If the payload contains special characters like template expressions (${...}, #{...}, <%...%> etc.) define them as raw strings r'...' or assign to variables. NEVER use f-strings for payloads.
+- The script must print clear success/failure output so results can be verified.
 - Output ONLY Python code enclosed in a ```python block. Zero explanations outside the code block.
 """
 
@@ -63,7 +64,24 @@ Write the Python PoC script inside a ```python block to exploit this vulnerabili
 
     if python_code_match:
         poc_code = python_code_match.group(1).strip()
+    else:
+        # Fallback 1: code block without 'python' label (just ``` ... ```)
+        plain_match = re.search(r'```\s*\n(.*?)\n\s*```', clean_response, re.DOTALL)
+        if not plain_match:
+            plain_match = re.search(r'```\s*\n(.*?)\n\s*```', response, re.DOTALL)
+        if plain_match:
+            poc_code = plain_match.group(1).strip()
+            python_code_match = plain_match  # reuse flag below
+        else:
+            # Fallback 2: response is raw code (starts with import/#!/usr/bin)
+            stripped = clean_response.strip()
+            if stripped.startswith(("import ", "#!/", "import\n", "requests", "import requests")):
+                poc_code = stripped
+                python_code_match = True  # truthy sentinel
+            else:
+                poc_code = None
 
+    if poc_code:
         with open("exploit.py", "w", encoding="utf-8") as f:
             f.write(poc_code)
         print("[*] PoC script generated and saved as 'exploit.py'.")
