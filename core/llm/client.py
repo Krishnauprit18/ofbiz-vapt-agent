@@ -1,5 +1,6 @@
 import requests
 import json
+from core.codebase.vuln_parser import parse_vuln_context, build_analysis_anchor
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 
@@ -38,26 +39,30 @@ class OllamaClient:
 
         context_str = f"\n\n--- ACTUAL CODE CONTEXT FROM CODEBASE ---\n{code_context}" if code_context else ""
 
+        # Pre-parse vuln context — same analysis a human does before reviewing code
+        vuln_ctx = parse_vuln_context(description)
+        anchor = build_analysis_anchor(vuln_ctx, description)
+
         prompt = (
             f"You are a Senior Penetration Tester performing a targeted vulnerability analysis.\n\n"
             f"## Vulnerability Description (THIS IS YOUR PRIMARY FOCUS)\n"
             f"{description}\n\n"
+            f"{anchor}\n"
             f"## Your Task\n"
             f"Trace the EXACT attack vector described above through the provided source code. "
             f"Do NOT do a general code review. Stay strictly focused on the described vulnerability.\n\n"
             f"Answer these specific questions using only the code provided:\n"
-            f"1. Which exact method/line triggers the vulnerability?\n"
-            f"2. What user-controlled input reaches the vulnerable code path?\n"
-            f"3. What validation is missing or bypassed, and at which line?\n"
+            f"1. Which exact method/line in which file is the entry point for the attack?\n"
+            f"2. What user-controlled input reaches the vulnerable code path, and how?\n"
+            f"3. What validation is missing or bypassed, and at which exact line?\n"
             f"4. What is the concrete impact (what can an attacker do)?\n"
-            f"5. What is the minimal fix?\n\n"
-            f"Map every claim to an exact filename + method name from the code context. "
-            f"STRICT RULE: Only reference files that appear in the code context above. "
-            f"Do NOT invent or mention any file (e.g. ImageManagement.java, ServiceUtil.java) that is not in the context. "
-            f"If a step in the attack chain is NOT present in the provided code, say so explicitly.\n"
+            f"5. What is the minimal one-line or one-method fix?\n\n"
+            f"STRICT RULE: Only reference files that appear in the code context below. "
+            f"Do NOT invent or mention any file not present in the context. "
+            f"If a step in the attack chain is NOT traceable in the provided code, say so explicitly.\n"
             f"{context_str}\n\n"
-            f"Format your output in Markdown with sections: "
-            f"**Attack Chain**, **Vulnerable Code**, **Root Cause**, **Impact**, **Fix**."
+            f"Format output in Markdown with sections: "
+            f"**Attack Chain**, **Vulnerable Code** (filename + method + line), **Root Cause**, **Impact**, **Fix**."
         )
 
         payload = {
