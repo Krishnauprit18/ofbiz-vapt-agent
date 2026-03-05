@@ -19,49 +19,70 @@ def reproduce_vulnerability(client, vuln_description, code_context, analysis):
     """
     print("[*] Generating minimal reproduction test case...")
 
-    system_prompt = """You are a penetration tester demonstrating a confirmed vulnerability in Apache OFBiz.
-Generate a Python 3 exploit script that:
-  1. Reproduces the vulnerability step-by-step
-  2. Captures and prints CONCRETE EVIDENCE of exploitation (cookies, tokens, response bodies, file contents)
-  3. Clearly shows the IMPACT — what an attacker can steal or execute
+    system_prompt = """You are a penetration tester writing a BLACK-BOX HTTP exploit script in Python 3.
 
-CRITICAL RULES:
-- Target: https://localhost:8443  (HTTP fallback: http://localhost:18080)
-- Import and use at the top:
-    import urllib3, requests
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    session = requests.Session()
-    session.verify = False
-- Always use session.get/post (verify=False handled by session)
-- Print each step with full details:
-    print("="*50)
-    print("STEP N: <description>")
-    print(f"  → URL: <url>")
-    print(f"  → Status: <status_code>")
-    print(f"  → Response snippet: <first 500 chars of response>")
-- After exploitation, print an IMPACT EVIDENCE block:
-    print("\\n=== IMPACT EVIDENCE ===")
-    print(f"Session cookies: {dict(session.cookies)}")
-    print(f"Payload confirmed in response: <yes/no + what was found>")
-    print(f"Attacker can: <describe impact — XSS execution, RCE, session theft, etc.>")
-    print(f"Affected URL: <the URL the victim visits to trigger the exploit>")
-- At the very end print exactly one of:
-    RESULT: VULNERABLE
-    RESULT: NOT VULNERABLE
-- Output ONLY code in a ```python block. No explanations outside the block.
+ABSOLUTE RULES — VIOLATION WILL BREAK THE SCRIPT:
+- This is a NETWORK exploit. You send HTTP requests to a running server. You do NOT import Java classes.
+- NEVER import anything from 'com.*', 'org.*', 'java.*', or any Java package. Those are Java — not Python.
+- ONLY use standard Python libraries: requests, urllib3, os, re, sys, time, pathlib, io, struct
+- The server is already running. You only interact with it via HTTP.
+
+REQUIRED SCRIPT STRUCTURE:
+```python
+import requests, urllib3, os, sys
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+session = requests.Session()
+session.verify = False
+
+BASE = "http://localhost:18080"   # HTTP port (use this — not HTTPS)
+
+# STEP 1: Login as admin
+print("="*50)
+print("STEP 1: Login to OFBiz as admin")
+r = session.post(f"{BASE}/catalog/control/login",
+    data={"USERNAME": "admin", "PASSWORD": "ofbiz", "JavaScriptEnabled": "Y"})
+print(f"  → Status: {r.status_code}")
+print(f"  → Cookies: {dict(session.cookies)}")
+
+# STEP 2: <do the exploit>
+...
+
+# At the end:
+print("\\n=== IMPACT EVIDENCE ===")
+print(f"Session cookies: {dict(session.cookies)}")
+print(f"Payload confirmed: <yes/no and what was found>")
+print(f"Attacker can: <describe XSS/RCE/data theft impact>")
+print(f"Affected URL: <URL victim visits to trigger exploit>")
+print("RESULT: VULNERABLE")   # or RESULT: NOT VULNERABLE
+```
+
+For THIS specific XSS vulnerability, the exploit flow is:
+1. POST /catalog/control/login → get session cookies
+2. Upload a polyglot file (JPEG + HTML payload) with filename ending in .htm via multipart POST to /catalog/control/UploadProductImage?productId=<id>&up_load_file_type=original
+3. GET /images/products/<productId>/original.htm → check if HTML payload is present in response
+4. Print the response body snippet showing the XSS payload survived
+
+Output ONLY the Python code in a ```python block.
 """
 
     prompt = f"""
 ### Vulnerability Description
 {vuln_description}
 
-### Relevant Source Code
-{code_context}
+### Relevant Source Code (READ THIS — understand HOW the server processes requests)
+{code_context[:6000]}
 
 ### Vulnerability Analysis
-{analysis}
+{analysis[:2000]}
 
-Write a minimal Python verification script in a ```python block.
+### Your Task
+Write a Python 3 HTTP exploit script that:
+1. Sends HTTP requests to http://localhost:18080 (the running OFBiz server)
+2. Reproduces the vulnerability described above
+3. Captures concrete evidence (response body, cookies, file content served back)
+
+REMINDER: Pure Python HTTP client only. NO Java imports. Use requests.Session().
+Output ONLY a ```python code block.
 """
 
     try:
@@ -86,6 +107,16 @@ Write a minimal Python verification script in a ```python block.
         )
 
     test_code = _patch_ssl_verify(match.group(1).strip())
+
+    # Safety check: reject if LLM hallucinated Java imports
+    java_import = re.search(r'^\s*(?:from|import)\s+(?:com|org|java|javax)\.', test_code, re.MULTILINE)
+    if java_import:
+        return _error_report(
+            vuln_description,
+            f"LLM generated Java imports in Python script (e.g. `{java_import.group(0).strip()}`). "
+            "This is invalid Python. Please re-run reproduction — the model needs to generate "
+            "pure HTTP requests using the `requests` library only."
+        )
 
     # Save test
     test_file = "repro_test.py"
