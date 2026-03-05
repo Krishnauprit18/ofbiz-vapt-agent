@@ -34,7 +34,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 session = requests.Session()
 session.verify = False
 
-BASE = "http://localhost:18080"   # HTTP port (use this — not HTTPS)
+BASE = "https://localhost:8443"   # OFBiz default HTTPS port (verify=False handles self-signed cert)
 
 # STEP 1: Login as admin
 print("="*50)
@@ -57,9 +57,9 @@ print("RESULT: VULNERABLE")   # or RESULT: NOT VULNERABLE
 ```
 
 For THIS specific XSS vulnerability, the exploit flow is:
-1. POST /catalog/control/login → get session cookies
-2. Upload a polyglot file (JPEG + HTML payload) with filename ending in .htm via multipart POST to /catalog/control/UploadProductImage?productId=<id>&up_load_file_type=original
-3. GET /images/products/<productId>/original.htm → check if HTML payload is present in response
+1. POST https://localhost:8443/catalog/control/login → get session cookies
+2. Upload a polyglot file (JPEG + HTML payload) with filename ending in .htm via multipart POST to https://localhost:8443/catalog/control/UploadProductImage?productId=<id>&up_load_file_type=original
+3. GET https://localhost:8443/images/products/<productId>/original.htm → check if HTML payload is present in response
 4. Print the response body snippet showing the XSS payload survived
 
 Output ONLY the Python code in a ```python block.
@@ -77,11 +77,11 @@ Output ONLY the Python code in a ```python block.
 
 ### Your Task
 Write a Python 3 HTTP exploit script that:
-1. Sends HTTP requests to http://localhost:18080 (the running OFBiz server)
+1. Sends HTTP requests to https://localhost:8443 (the running OFBiz server, verify=False for self-signed cert)
 2. Reproduces the vulnerability described above
 3. Captures concrete evidence (response body, cookies, file content served back)
 
-REMINDER: Pure Python HTTP client only. NO Java imports. Use requests.Session().
+REMINDER: Pure Python HTTP client only. NO Java imports. Use requests.Session() with session.verify = False.
 Output ONLY a ```python code block.
 """
 
