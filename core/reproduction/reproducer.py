@@ -19,25 +19,36 @@ def reproduce_vulnerability(client, vuln_description, code_context, analysis):
     """
     print("[*] Generating minimal reproduction test case...")
 
-    system_prompt = """You are a Security QA Engineer. Generate a SIMPLE Python 3 verification script
-that checks whether a vulnerability exists in a running Apache OFBiz instance.
+    system_prompt = """You are a penetration tester demonstrating a confirmed vulnerability in Apache OFBiz.
+Generate a Python 3 exploit script that:
+  1. Reproduces the vulnerability step-by-step
+  2. Captures and prints CONCRETE EVIDENCE of exploitation (cookies, tokens, response bodies, file contents)
+  3. Clearly shows the IMPACT — what an attacker can steal or execute
 
 CRITICAL RULES:
-- Target: https://localhost:8443 with verify=False (self-signed cert)
-- Add at the top:
-    import urllib3
+- Target: https://localhost:8443  (HTTP fallback: http://localhost:18080)
+- Import and use at the top:
+    import urllib3, requests
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-- Every requests call MUST include verify=False
-- Keep it MINIMAL — just enough to confirm the vulnerability exists or not
-- Print EACH STEP clearly:
-    Step 1: [what you're doing]
-    → Sending: [method] [URL]
-    → Status: [code]
-    → Response snippet: [relevant part]
-- At the very end, print exactly one of:
+    session = requests.Session()
+    session.verify = False
+- Always use session.get/post (verify=False handled by session)
+- Print each step with full details:
+    print("="*50)
+    print("STEP N: <description>")
+    print(f"  → URL: <url>")
+    print(f"  → Status: <status_code>")
+    print(f"  → Response snippet: <first 500 chars of response>")
+- After exploitation, print an IMPACT EVIDENCE block:
+    print("\\n=== IMPACT EVIDENCE ===")
+    print(f"Session cookies: {dict(session.cookies)}")
+    print(f"Payload confirmed in response: <yes/no + what was found>")
+    print(f"Attacker can: <describe impact — XSS execution, RCE, session theft, etc.>")
+    print(f"Affected URL: <the URL the victim visits to trigger the exploit>")
+- At the very end print exactly one of:
     RESULT: VULNERABLE
     RESULT: NOT VULNERABLE
-- Output ONLY code in a ```python block
+- Output ONLY code in a ```python block. No explanations outside the block.
 """
 
     prompt = f"""
@@ -113,6 +124,14 @@ Write a minimal Python verification script in a ```python block.
         verdict = "INCONCLUSIVE — Review output manually"
         verdict_icon = "🟡"
 
+    # Extract IMPACT EVIDENCE block from stdout if present
+    impact_block = ""
+    if "=== IMPACT EVIDENCE ===" in stdout:
+        impact_start = stdout.index("=== IMPACT EVIDENCE ===")
+        impact_raw = stdout[impact_start:]
+        result_match = re.search(r'\nRESULT:', impact_raw)
+        impact_block = impact_raw[:result_match.start()].strip() if result_match else impact_raw.strip()
+
     # Build report
     report = f"""# Vulnerability Reproduction Report
 
@@ -121,16 +140,17 @@ Write a minimal Python verification script in a ```python block.
 ## Vulnerability
 {vuln_description}
 
+## Impact Evidence
+{impact_block if impact_block else "_No structured impact block — see full output below._"}
+
 ## Reproduction Test Script
 ```python
 {test_code}
 ```
 
-## Execution Results
+## Full Execution Output
 - **Exit Code:** {exit_code}
-- **Verdict:** {verdict}
 
-### Standard Output
 ```
 {stdout if stdout else "(empty)"}
 ```
@@ -139,10 +159,6 @@ Write a minimal Python verification script in a ```python block.
 ```
 {stderr if stderr else "None"}
 ```
-
-## Steps Performed
-The test script above was auto-generated and executed against `https://localhost:8443`.
-Each step's HTTP request and response are printed in the output above.
 
 ## Analysis Summary
 {analysis[:1000]}{"..." if len(analysis) > 1000 else ""}
