@@ -48,18 +48,29 @@ Write the Python PoC script inside a ```python block to exploit this vulnerabili
         print("[!] PoC generation aborted: Ollama connection lost.")
         return None
 
-    # Extract Python code from the markdown response
-    python_code_match = re.search(r'```python\n(.*?)\n```', response, re.DOTALL)
+    # DeepSeek-R1 wraps output in <think>...</think> — strip it first
+    clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+    # If stripping leaves nothing useful, fallback to full response
+    if len(clean_response) < 50:
+        clean_response = response
+
+    # Flexible regex: handles varied spacing/newlines around fences
+    python_code_match = re.search(r'```python\s*\n(.*?)\n\s*```', clean_response, re.DOTALL)
+
+    # Fallback: sometimes DeepSeek puts code inside <think> block itself
+    if not python_code_match:
+        python_code_match = re.search(r'```python\s*\n(.*?)\n\s*```', response, re.DOTALL)
+
     if python_code_match:
-        poc_code = python_code_match.group(1)
-        
-        # Save the PoC
+        poc_code = python_code_match.group(1).strip()
+
         with open("exploit.py", "w", encoding="utf-8") as f:
             f.write(poc_code)
         print("[*] PoC script generated and saved as 'exploit.py'.")
         return "exploit.py"
     else:
         print("[!] Failed to extract Python code from the LLM response.")
+        print(f"[*] Raw response (first 500 chars): {response[:500]}")
         with open("failed_exploit_generation.md", "w") as f:
             f.write(response)
         return None
