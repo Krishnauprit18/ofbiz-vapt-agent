@@ -52,6 +52,8 @@ class OllamaClient:
             f"4. What is the concrete impact (what can an attacker do)?\n"
             f"5. What is the minimal fix?\n\n"
             f"Map every claim to an exact filename + method name from the code context. "
+            f"STRICT RULE: Only reference files that appear in the code context above. "
+            f"Do NOT invent or mention any file (e.g. ImageManagement.java, ServiceUtil.java) that is not in the context. "
             f"If a step in the attack chain is NOT present in the provided code, say so explicitly.\n"
             f"{context_str}\n\n"
             f"Format your output in Markdown with sections: "

