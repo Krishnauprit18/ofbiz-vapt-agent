@@ -1,75 +1,88 @@
+"""
+OFBiz VAPT Agent — Phase 1: Vulnerability Analysis
+
+Analyzes the vulnerability using the actual OFBiz codebase and an LLM.
+Saves results so Phase 2 commands can pick up without re-running analysis.
+
+Usage:
+    python3 cli/analyze.py "vulnerability description here"
+
+After this completes, choose one:
+    python3 cli/reproduce.py --no-docker   → Reproduce + detailed report
+    python3 cli/poc.py                     → Generate PoC exploit only
+    python3 cli/patch.py                   → Generate security patch
+"""
+
 import argparse
+import json
 import sys
 from pathlib import Path
 
-from core.llm.client import OllamaClient, OllamaConnectionError, get_analysis
+from core.llm.client import OllamaClient, OllamaConnectionError
 from core.codebase.retriever import get_code_context
-from core.reproduction.poc_generator import generate_poc
-from core.reproduction.executor import run_exploit
-from core.deployment.manager import DeployManager
+
 
 def main():
-    parser = argparse.ArgumentParser(description="OFBiz VAPT Agent Input CLI")
-    parser.add_argument("description", type=str, help="Vulnerability description as a string")
-    parser.add_argument("--no-docker", action="store_true", help="Run in Manual Mode (No Docker, checks for existing OFBiz port 8443)")
-
+    parser = argparse.ArgumentParser(
+        description="OFBiz VAPT Agent — Phase 1: Vulnerability Analysis"
+    )
+    parser.add_argument("description", type=str, help="Vulnerability description")
     args = parser.parse_args()
-    vuln_description = args.description
-    print(f"[*] Input received.")
 
-    # ── Phase 0: Ollama Pre-flight Check ──────────────────────────────────────
+    vuln_description = args.description
+    print(f"[*] Input received. Starting Phase 1 — Analysis Only.")
+
+    # ── Ollama Pre-flight ─────────────────────────────────────────────────────
     client = OllamaClient()
     try:
         client.health_check()
         print(f"[✓] Ollama is running. Model: {client.model}")
     except OllamaConnectionError as e:
         print(str(e))
-        print("[!] Aborting: Ollama must be running before starting analysis.")
         sys.exit(1)
 
-    # ── Phase 1: Codebase Context Retrieval ───────────────────────────────────
-    print(f"[*] Retrieving codebase context (Searching for files referenced in description)...")
+    # ── Step 1: Codebase Context Retrieval ────────────────────────────────────
+    print("[*] Retrieving codebase context...")
     code_context = get_code_context(vuln_description)
 
-    # ── Phase 2: LLM Analysis ─────────────────────────────────────────────────
-    print(f"[*] Starting LLM analysis with {client.model} (using local code context)...")
+    # Save code context for Phase 2 commands
+    Path("code_context.txt").write_text(code_context, encoding="utf-8")
+    print(f"[✓] Code context saved ({len(code_context)} chars)")
+
+    # ── Step 2: LLM Analysis ─────────────────────────────────────────────────
+    print(f"[*] Starting LLM analysis with {client.model}...")
     try:
-        analysis_result = client.analyze_vulnerability(vuln_description, code_context)
+        analysis = client.analyze_vulnerability(vuln_description, code_context)
     except OllamaConnectionError as e:
         print(str(e))
-        print("[!] Aborting: LLM analysis failed.")
         sys.exit(1)
 
-    # ── Phase 3: Save & Validate Analysis Output ──────────────────────────────
-    output_file = Path("vuln_understanding.md")
-    try:
-        output_file.write_text(analysis_result, encoding="utf-8")
-        print(f"[*] Analysis complete! Result saved to: {output_file}")
-    except Exception as e:
-        print(f"[!] Error saving analysis: {e}")
-        sys.exit(1)
+    Path("vuln_understanding.md").write_text(analysis, encoding="utf-8")
+    print(f"[✓] Analysis saved to vuln_understanding.md")
 
-    print("-" * 50)
-    print("Vulnerability Understanding Preview:")
-    print("-" * 50)
-    print(analysis_result[:500] + "..." if len(analysis_result) > 500 else analysis_result)
-    print("-" * 50)
+    # ── Save State for Phase 2 ───────────────────────────────────────────────
+    state = {
+        "description": vuln_description,
+        "code_context_file": "code_context.txt",
+        "analysis_file": "vuln_understanding.md",
+    }
+    Path(".vapt_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
-    # ── Phase 4: Target Deployment ────────────────────────────────────────────
-    print("\n[*] Starting Target Deployment Phase...")
-    deployer = DeployManager(use_docker=not args.no_docker)
-    if not deployer.deploy():
-        print("[!] Aborting exploitation due to deployment failure.")
-        sys.exit(1)
+    # ── Preview ──────────────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print("VULNERABILITY ANALYSIS REPORT")
+    print("=" * 60)
+    print(analysis[:800] + "\n..." if len(analysis) > 800 else analysis)
+    print("=" * 60)
 
-    # ── Phase 5: PoC Generation & Execution ───────────────────────────────────
-    print("\n[*] Starting Vulnerability Reproduction Phase (Auto-Exploitation)...")
-    poc_script_path = generate_poc(vuln_description, code_context, analysis_result)
+    # ── Next Steps Menu ──────────────────────────────────────────────────────
+    print("\n[✓] Phase 1 Complete! Choose your next action:\n")
+    print("  ┌─────────────────────────────────────────────────────────────┐")
+    print("  │  python3 cli/reproduce.py --no-docker  → Reproduce & report│")
+    print("  │  python3 cli/poc.py                    → PoC exploit only  │")
+    print("  │  python3 cli/patch.py                  → Patch + git diff  │")
+    print("  └─────────────────────────────────────────────────────────────┘")
 
-    if poc_script_path:
-        run_exploit(poc_script_path)
-    else:
-        print("[!] Reproduction phase aborted due to PoC generation failure.")
 
 if __name__ == "__main__":
     main()
