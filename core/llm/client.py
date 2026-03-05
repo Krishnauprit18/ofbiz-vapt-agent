@@ -39,12 +39,23 @@ class OllamaClient:
         context_str = f"\n\n--- ACTUAL CODE CONTEXT FROM CODEBASE ---\n{code_context}" if code_context else ""
 
         prompt = (
-            f"You are a Senior Security Application Researcher. Carefully analyze the following vulnerability description "
-            f"using the provided local codebase context as your primary source of truth. "
-            f"Ensure your analysis maps exactly to the provided code and avoid hallucinating files or paths not present in the context.\n\n"
-            f"Vulnerability Description: {description}"
+            f"You are a Senior Penetration Tester performing a targeted vulnerability analysis.\n\n"
+            f"## Vulnerability Description (THIS IS YOUR PRIMARY FOCUS)\n"
+            f"{description}\n\n"
+            f"## Your Task\n"
+            f"Trace the EXACT attack vector described above through the provided source code. "
+            f"Do NOT do a general code review. Stay strictly focused on the described vulnerability.\n\n"
+            f"Answer these specific questions using only the code provided:\n"
+            f"1. Which exact method/line triggers the vulnerability?\n"
+            f"2. What user-controlled input reaches the vulnerable code path?\n"
+            f"3. What validation is missing or bypassed, and at which line?\n"
+            f"4. What is the concrete impact (what can an attacker do)?\n"
+            f"5. What is the minimal fix?\n\n"
+            f"Map every claim to an exact filename + method name from the code context. "
+            f"If a step in the attack chain is NOT present in the provided code, say so explicitly.\n"
             f"{context_str}\n\n"
-            f"Provide your output in Markdown format, identifying exact files, potential root causes, and fix recommendations."
+            f"Format your output in Markdown with sections: "
+            f"**Attack Chain**, **Vulnerable Code**, **Root Cause**, **Impact**, **Fix**."
         )
 
         payload = {
