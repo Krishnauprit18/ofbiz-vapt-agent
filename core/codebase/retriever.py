@@ -1,5 +1,8 @@
 import os
 import re
+import json
+import subprocess
+import tempfile
 from pathlib import Path
 
 _DEFAULT_CODEBASE = os.environ.get(
@@ -111,6 +114,93 @@ class CodebaseRetriever:
                     except: continue
         
         return "\n\n".join(results) if results else f"No request-map found for uri='{request_uri}'"
+
+    def semantic_search(self, pattern, language="java"):
+        """
+        Uses Semgrep to perform an Abstract Syntax Tree (AST) based search.
+        Pattern example: 'class $CLASS implements $INTERFACE { ... }'
+        """
+        try:
+            cmd = ["semgrep", "scan", "--lang", language, "--pattern", pattern, "--quiet", str(self.codebase_root)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            return result.stdout[:2000] if result.stdout else "No matches found."
+        except FileNotFoundError:
+            return "Error: Semgrep is not installed. Please run `pip install semgrep`."
+
+    def get_method_body(self, filename, method_name):
+        """
+        Extracts the full body of a method using Semgrep line detection.
+        """
+        path = self.find_file(filename)
+        if not path: return f"Error: File {filename} not found."
+        
+        # Semgrep pattern to find method and its line range
+        pattern = f"... {method_name}(...) {{ ... }}"
+        try:
+            cmd = ["semgrep", "scan", "--lang", "java", "--pattern", pattern, "--json", str(path)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            data = json.loads(result.stdout)
+            
+            if not data.get("results"):
+                return f"Method {method_name} not found in {filename}."
+            
+            # Get start and end lines from the first match
+            res = data["results"][0]
+            start = res["start"]["line"]
+            end = res["end"]["line"]
+            
+            return self.read_file(filename, start, end)
+        except Exception as e:
+            return f"Error extracting method: {e}"
+
+    def vector_search(self, query, top_k=3):
+        """
+        Queries the local vector index (built via indexer.py).
+        """
+        index_path = Path("codebase_index.json")
+        if not index_path.exists():
+            return "Error: Vector index not found. Run `python core/codebase/indexer.py` first."
+        
+        try:
+            # For simplicity without heavy DBs, we'll use our indexer's search logic
+            from core.codebase.indexer import search_index
+            results = search_index(query, top_k=top_k)
+            return "\n\n".join(results) if results else "No semantic matches found."
+        except Exception as e:
+            return f"Vector search error: {e}"
+
+    def taint_analysis(self, source, sink, language="java"):
+        """
+        Runs a Semgrep taint analysis dynamically by creating a temporary rule.
+        """
+        rule = {
+            "rules": [
+                {
+                    "id": "dynamic-taint",
+                    "languages": [language],
+                    "message": "Taint flow found",
+                    "severity": "WARNING",
+                    "mode": "taint",
+                    "pattern-sources": [{"pattern": source}],
+                    "pattern-sinks": [{"pattern": sink}]
+                }
+            ]
+        }
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump(rule, f)
+                rule_file = f.name
+
+            cmd = ["semgrep", "scan", "-f", rule_file, "--quiet", str(self.codebase_root)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            os.remove(rule_file)
+            return result.stdout[:4000] if result.stdout else "No taint flows found."
+        except FileNotFoundError:
+            return "Error: Semgrep is not installed. Please run `pip install semgrep`."
+        except Exception as e:
+            if 'rule_file' in locals() and os.path.exists(rule_file):
+                os.remove(rule_file)
+            return f"Taint analysis error: {e}"
 
     def retrieve_context(self, description):
         """Old method kept for compatibility."""
