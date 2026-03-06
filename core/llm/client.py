@@ -9,7 +9,7 @@ class OllamaConnectionError(Exception):
     pass
 
 class OllamaClient:
-    def __init__(self, base_url=OLLAMA_BASE_URL, model="deepseek-r1:7b"):
+    def __init__(self, base_url=OLLAMA_BASE_URL, model="qwen2.5-coder:7b"):
         self.base_url = base_url
         self.generate_url = f"{base_url}/api/generate"
         self.model = model
@@ -50,9 +50,7 @@ class OllamaClient:
             f"{anchor}\n"
             f"## Your Task\n"
             f"Trace the EXACT attack vector described above through the provided source code. "
-            f"Do NOT do a general code review. Stay strictly focused on the described vulnerability.\n"
-            f"Do NOT analyze Office files, PDF conversion, audio validation, video handling, "
-            f"or any feature not directly involved in the attack chain described.\n\n"
+            f"Do NOT do a general code review. Stay strictly focused on the described vulnerability.\n\n"
             f"Answer these specific questions using only the code provided:\n"
             f"1. Which exact method/line in which file is the entry point for the attack?\n"
             f"2. What user-controlled input reaches the vulnerable code path, and how?\n"

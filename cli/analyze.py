@@ -1,16 +1,7 @@
 """
-OFBiz VAPT Agent — Phase 1: Vulnerability Analysis
+OFBiz VAPT Agent — Phase 1: Vulnerability Analysis (Agentic)
 
-Analyzes the vulnerability using the actual OFBiz codebase and an LLM.
-Saves results so Phase 2 commands can pick up without re-running analysis.
-
-Usage:
-    python3 cli/analyze.py "vulnerability description here"
-
-After this completes, choose one:
-    python3 cli/reproduce.py --no-docker   → Reproduce + detailed report
-    python3 cli/poc.py                     → Generate PoC exploit only
-    python3 cli/patch.py                   → Generate security patch
+Uses an iterative agent to explore the codebase and understand the vulnerability.
 """
 
 import argparse
@@ -18,8 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-from core.llm.client import OllamaClient, OllamaConnectionError
-from core.codebase.retriever import get_code_context
+from core.llm.agent import CodebaseAgent
 
 
 def main():
@@ -30,35 +20,24 @@ def main():
     args = parser.parse_args()
 
     vuln_description = args.description
-    print(f"[*] Input received. Starting Phase 1 — Analysis Only.")
+    print(f"[*] Starting Phase 1 — Agentic Exploration.")
 
-    # ── Ollama Pre-flight ─────────────────────────────────────────────────────
-    client = OllamaClient()
+    # ── Agentic Exploration ──────────────────────────────────────────────────
+    agent = CodebaseAgent()
     try:
-        client.health_check()
-        print(f"[✓] Ollama is running. Model: {client.model}")
-    except OllamaConnectionError as e:
-        print(str(e))
+        analysis = agent.run(vuln_description)
+    except Exception as e:
+        print(f"[!] Agent error: {e}")
         sys.exit(1)
 
-    # ── Step 1: Codebase Context Retrieval ────────────────────────────────────
-    print("[*] Retrieving codebase context...")
-    code_context = get_code_context(vuln_description)
-
-    # Save code context for Phase 2 commands
-    Path("code_context.txt").write_text(code_context, encoding="utf-8")
-    print(f"[✓] Code context saved ({len(code_context)} chars)")
-
-    # ── Step 2: LLM Analysis ─────────────────────────────────────────────────
-    print(f"[*] Starting LLM analysis with {client.model}...")
-    try:
-        analysis = client.analyze_vulnerability(vuln_description, code_context)
-    except OllamaConnectionError as e:
-        print(str(e))
-        sys.exit(1)
-
+    # Save results
     Path("vuln_understanding.md").write_text(analysis, encoding="utf-8")
-    print(f"[✓] Analysis saved to vuln_understanding.md")
+    
+    # Save the exploration history as context for Phase 2
+    history_str = ""
+    for msg in agent.history:
+        history_str += f"\n--- {msg['role'].upper()} ---\n{msg['content']}\n"
+    Path("code_context.txt").write_text(history_str, encoding="utf-8")
 
     # ── Save State for Phase 2 ───────────────────────────────────────────────
     state = {
@@ -68,12 +47,7 @@ def main():
     }
     Path(".vapt_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
-    # ── Preview ──────────────────────────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print("VULNERABILITY ANALYSIS REPORT")
-    print("=" * 60)
-    print(analysis[:800] + "\n..." if len(analysis) > 800 else analysis)
-    print("=" * 60)
+    print(f"\n[✓] Agentic exploration complete. Analysis saved to vuln_understanding.md")
 
     # ── Next Steps Menu ──────────────────────────────────────────────────────
     print("\n[✓] Phase 1 Complete! Choose your next action:\n")

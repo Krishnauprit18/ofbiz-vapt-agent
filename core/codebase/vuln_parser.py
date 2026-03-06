@@ -177,13 +177,11 @@ def build_analysis_anchor(ctx: dict, vuln_desc: str) -> str:
 - **Is File Upload Involved**: {ctx["is_upload"]}
 - **Login App**: /{ctx["login_app"]}/control/login
 
-## What to trace in the code (ONLY this — ignore everything else):
+## What to trace in the code:
 1. Find where parameters [{params_str}] enter the codebase
-2. Follow ONLY this data flow: {ctx["attack_summary"]}
-3. Identify exactly where validation is missing for THIS specific attack vector
-4. Do NOT describe Office file handling, PDF conversion, audio/video checks,
-   or any other feature in the code that is not part of this attack chain
-5. Do NOT suggest generic security improvements — only the specific bypass described
+2. Follow the data flow from those parameters to the vulnerable operation
+3. Identify exactly where validation is missing or bypassable
+4. Confirm the impact matches: {ctx["attack_summary"]}
 """
 
 
